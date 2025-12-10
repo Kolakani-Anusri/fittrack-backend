@@ -93,6 +93,59 @@ app.post("/register", async (req, res) => {
   }
 });
 
+// ---------- LOGIN USER ----------
+app.post("/login", async (req, res) => {
+  try {
+    const { mobile, password } = req.body;
+
+    if (!mobile || !password) {
+      return res
+        .status(400)
+        .json({ message: "Mobile and password are required." });
+    }
+
+    const user = await User.findOne({ mobile: mobile.trim() });
+    if (!user) {
+      return res
+        .status(401)
+        .json({ message: "Invalid mobile or password." });
+    }
+
+    const isMatch = await bcrypt.compare(password, user.passwordHash);
+    if (!isMatch) {
+      return res
+        .status(401)
+        .json({ message: "Invalid mobile or password." });
+    }
+
+    const token = jwt.sign(
+      { id: user._id, mobile: user.mobile },
+      JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    return res.json({
+      message: "Login successful",
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        mobile: user.mobile,
+        email: user.email,
+        age: user.age,
+        height: user.height,
+        weight: user.weight,
+        gender: user.gender,
+      },
+    });
+  } catch (err) {
+    console.error("❌ /login error:", err);
+    return res
+      .status(500)
+      .json({ message: "Internal server error during login." });
+  }
+});
+
 // ---------- ADMIN AUTH ----------
 function checkAdmin(req, res, next) {
   const pwd = req.header("x-admin-password");
