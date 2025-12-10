@@ -165,6 +165,57 @@ app.get("/admin/users", checkAdmin, async (req, res) => {
   }
 });
 
+// ---------- OWNER: DOWNLOAD USERS CSV ----------
+app.get("/admin/users/csv", checkAdmin, async (req, res) => {
+  try {
+    const users = await User.find().sort({ createdAt: -1 }).lean();
+
+    const headers = [
+      "Name",
+      "Mobile",
+      "Email",
+      "Age",
+      "Gender",
+      "Height_cm",
+      "Weight_kg",
+      "CreatedAt",
+    ];
+
+    const rows = users.map((u) => [
+      u.name || "",
+      u.mobile || "",
+      u.email || "",
+      u.age ?? "",
+      u.gender || "",
+      u.height ?? "",
+      u.weight ?? "",
+      u.createdAt ? u.createdAt.toISOString() : "",
+    ]);
+
+    const escapeCell = (value) =>
+      `"${String(value).replace(/"/g, '""')}"`;
+
+    const csvLines = [
+      headers.join(","),
+      ...rows.map((row) => row.map(escapeCell).join(",")),
+    ];
+
+    const csv = csvLines.join("\n");
+
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader(
+      "Content-Disposition",
+      'attachment; filename="fittrack_users.csv"'
+    );
+    res.send(csv);
+  } catch (err) {
+    console.error("❌ /admin/users/csv error:", err);
+    res.status(500).json({ message: "Failed to generate CSV." });
+  }
+});
+
+
+
 // ---------- START SERVER ----------
 const server = app.listen(PORT, () => {
   console.log(`🚀 FitTrack backend running on port ${PORT}`);
