@@ -293,7 +293,7 @@ Report text (trimmed): ${cleaned.slice(0, 6000)}
 `;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4.1-mini",
+      model: "gpt-4o-mini",
       messages: [{ role: "system", content: "You carefully interpret medical reports." }, { role: "user", content: prompt }],
       temperature: 0.2,
     });
@@ -370,7 +370,7 @@ Report text (trimmed): ${text.slice(0, 6000)}
 `;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4.1-mini",
+      model: "gpt-4o-mini",
       messages: [{ role: "system", content: "You carefully analyze medical reports." }, { role: "user", content: prompt }],
       temperature: 0.2,
     });
