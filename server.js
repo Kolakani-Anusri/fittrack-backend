@@ -1,6 +1,16 @@
 // server.js
 // FitTrack backend — full version with PDF upload + AI evaluation
 
+function safeJsonParse(val, fallback = null) {
+  try {
+    if (typeof val === "object") return val;
+    return JSON.parse(val);
+  } catch {
+    return fallback;
+  }
+}
+
+
 require("dotenv").config(); // ← dotenv MUST exist
 const express = require("express");
 const cors = require("cors");
@@ -318,90 +328,68 @@ Report text (trimmed): ${cleaned.slice(0, 6000)}
    AI: PDF UPLOAD & EVALUATE (recommended flow)
    Accepts: multipart/form-data with "report" (PDF) and optional "userMeta" (JSON string)
    ====================== */
-app.post("/ai-evaluate-pdf", upload.single("report"), async (req, res) => {
+   app.post("/ai-evaluate-pdf", upload.single("report"), async (req, res) => {
   try {
     if (!req.file || !req.file.buffer) {
-      return res.status(400).json({ error: "No PDF file uploaded" });
+      return res.status(400).json({ error: "No PDF uploaded" });
     }
 
-    // 🔹 Parse PDF safely
+    // 1️⃣ Extract text from PDF
     const parsed = await pdfParse(req.file.buffer);
 
-    // 🔹 Clean extracted text
-    let extractedText = parsed.text
+    let extractedText = (parsed.text || "")
       .replace(/\s+/g, " ")
       .replace(/[^\x20-\x7E]/g, "")
       .trim();
 
-    // 🔹 Strong validation
-    
-
-    if (!extractedText || extractedText.length < 50) {
-      extractedText = `
-    This medical document appears to be a scanned or image-based report where the textual content could not be extracted directly.
-    However, such reports commonly include patient laboratory investigations, diagnostic findings, and clinical parameters.
-
-    Assume the report may contain routine medical test values such as:
-    - Complete Blood Count (CBC)
-    - Hemoglobin levels
-    - Blood sugar (fasting and postprandial)
-    - Thyroid profile (TSH, T3, T4)
-    - Liver function tests
-    - Kidney function tests
-    - Lipid profile
-    - Vitamin levels (B12, D)
-    - Inflammatory markers
-    - Blood pressure records
-
-    Based on standard medical reference ranges for adults aged 15 years and above, analyze the possible health implications.
-    If any values are suspected to be abnormal, explain what they usually indicate, the level of severity, and common associated symptoms.
-
-    Provide a clear, patient-friendly explanation of potential health risks.
-    Include lifestyle guidance such as:
-    - Diet recommendations suitable for Indian food habits
-    - Exercise and physical activity suggestions
-    - Hydration and sleep advice
-    - When medical consultation is strongly advised
-
-    Do not assume a confirmed diagnosis.
-    Use cautious language such as "may indicate" or "could suggest".
-    Focus on educational and preventive health guidance.
-    `;
-    }
-
-    
-
-    // 🔹 Strong medical AI prompt
-    const prompt = `
+    // 2️⃣ ALWAYS CALL AI (NO EARLY RETURN)
+    const aiPrompt = `
 You are a senior medical doctor.
 
-Analyze the following medical report in detail.
-Identify:
-- Abnormal values
-- Possible conditions
-- Severity level
-- Clear explanation in simple language
-- Lifestyle and diet suggestions (India-friendly)
+The following text was extracted from a patient's uploaded medical report.
+Even if the text is incomplete or unclear, you MUST analyze it medically.
 
-Medical Report:
-${extractedText}
+Tasks:
+- Identify any possible abnormal findings
+- Explain potential health conditions
+- Mention severity (low / moderate / high)
+- Explain in simple language
+- Give Indian diet & lifestyle advice
+- Clearly say when doctor consultation is required
+- Do NOT give confirmed diagnosis
+
+Patient Medical Report Text:
+${extractedText || "The report appears scanned or low-text. Use medical reasoning based on typical reports."}
 `;
 
-    const response = await openai.chat.completions.create({
+    // 3️⃣ OPENAI CALL (THIS IS THE CORE FIX)
+    const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
+      messages: [
+        { role: "system", content: "You are a medical AI assistant." },
+        { role: "user", content: aiPrompt }
+      ],
       temperature: 0.3
     });
 
-    res.json({
+    const aiEvaluation = completion.choices[0].message.content;
+
+    // 4️⃣ RETURN AI RESULT ONLY
+    return res.json({
       success: true,
-      evaluation: response.choices[0].message.content
+      evaluation: aiEvaluation
     });
-  } catch (error) {
-    console.error("AI PDF evaluation error:", error);
-    res.status(500).json({ error: "Failed to evaluate medical report" });
+
+  } catch (err) {
+    console.error("AI Evaluation Error:", err);
+    return res.status(500).json({
+      success: false,
+      error: "AI evaluation failed"
+    });
   }
 });
+
+
 
 
 /* START */
