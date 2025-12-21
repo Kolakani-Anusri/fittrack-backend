@@ -258,6 +258,51 @@ ${text.slice(0, 4000)}
   }
 });
 
+app.post("/ai-diet-workout", async (req, res) => {
+  try {
+    if (!openai) {
+      return res.status(503).json({ message: "AI disabled" });
+    }
+
+    const { age, gender, height, weight, bmi, conditions, preference } = req.body;
+
+    const prompt = `
+You are a certified fitness and nutrition assistant.
+
+Create:
+1) Personalized diet plan
+2) Personalized workout plan
+
+User details:
+Age: ${age}
+Gender: ${gender}
+Height: ${height}
+Weight: ${weight}
+BMI: ${bmi}
+Medical Conditions: ${conditions || "None"}
+Food Preference: ${preference || "Vegetarian"}
+
+Return JSON ONLY:
+{
+  "dietPlan": "",
+  "workoutPlan": "",
+  "confidence": "high|medium|low"
+}
+`;
+
+    const result = await openai.chat.completions.create({
+      model: "gpt-4.1-mini",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.3,
+    });
+
+    res.json(JSON.parse(result.choices[0].message.content));
+  } catch (err) {
+    res.status(500).json({ message: "Diet/workout AI failed" });
+  }
+});
+
+
 /* ======================
    START SERVER
    ====================== */
