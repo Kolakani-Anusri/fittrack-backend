@@ -1,56 +1,38 @@
 // models/User.js
-const mongoose = require("mongoose");
+import mongoose from "mongoose";
 
 const userSchema = new mongoose.Schema(
   {
-    name: {
-      type: String,
-      required: true,
-      trim: true,
-    },
+    name: { type: String, required: true, trim: true },
     email: {
       type: String,
       trim: true,
       lowercase: true,
       unique: true,
-      sparse: true, // allows some users without email
+      sparse: true,
     },
     mobile: {
       type: String,
       trim: true,
       unique: true,
-      sparse: true, // allows some users without mobile
+      sparse: true,
     },
-    password: {
-      type: String,
-      required: true,
-    },
-    age: {
-      type: Number,
-    },
-    height: {
-      type: Number, // in cm
-    },
-    weight: {
-      type: Number, // in kg
-    },
+    password: { type: String, required: true },
+    age: Number,
+    height: Number,
+    weight: Number,
     gender: {
       type: String,
       enum: ["male", "female", "other"],
       default: "other",
     },
-    bmi: {
-      type: Number,
-    },
-    lastLogin: {
-      type: Date,
-    },
+    bmi: Number,
+    lastLogin: Date,
   },
-  {
-    timestamps: true, // createdAt, updatedAt
-  }
+  { timestamps: true }
 );
 
-const User = mongoose.model("User", userSchema);
+// ✅ Prevent model re-declaration
+const User = mongoose.models.User || mongoose.model("User", userSchema);
 
-module.exports = User;
+export default User;

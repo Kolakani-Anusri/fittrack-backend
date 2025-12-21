@@ -1,6 +1,7 @@
 // server.js
 // FitTrack backend — FINAL WORKING VERSION (Node 22+ / Render safe)
 
+import User from "./models/User.js";
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -9,7 +10,9 @@ import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import OpenAI from "openai";
-import pdf from "pdf-parse/lib/pdf-parse.js";
+import pdf from "pdf-parse";
+
+
 
 dotenv.config();
 
@@ -82,63 +85,60 @@ mongoose
     process.exit(1);
   });
 
-const userSchema = new mongoose.Schema(
-  {
-    name: { type: String, required: true },
-    email: String,
-    mobile: { type: String, required: true, unique: true },
-    passwordHash: { type: String, required: true },
-    age: Number,
-    height: Number,
-    weight: Number,
-    gender: { type: String, enum: ["male", "female"] },
-    createdAt: { type: Date, default: Date.now },
-  },
-  { collection: "fittrack_users" }
-);
-
-const User = mongoose.model("User", userSchema);
-
 /* ======================
    AUTH ROUTES
    ====================== */
 app.post("/register", async (req, res) => {
   try {
-    const { name, email, mobile, password, age, height, weight, gender } =
-      req.body;
+    const { name, age, height, weight, gender, mobile, email, password } = req.body;
 
-    if (!name || !mobile || !password) {
-      return res.status(400).json({ message: "Missing fields" });
+    // validation
+    if (!name || !age || !height || !weight || !gender || !mobile || !password) {
+      return res.status(400).json({ message: "Missing required fields" });
     }
 
-    const exists = await User.findOne({ mobile });
-    if (exists) {
-      return res.status(409).json({ message: "User already exists" });
+    // optional: prevent duplicate user
+    const existingUser = await User.findOne({ mobile });
+    if (existingUser) {
+      return res.status(200).json({ message: "User already exists" });
     }
 
-    const passwordHash = await bcrypt.hash(password, 10);
+    // save user
+    const hashedPassword = await bcrypt.hash(password, 10);
 
-    const user = await User.create({
+    const newUser = new User({
       name,
-      email,
-      mobile,
-      passwordHash,
       age,
       height,
       weight,
       gender,
+      mobile,
+      email,
+      password: hashedPassword,
     });
 
-    const token = jwt.sign({ id: user._id }, JWT_SECRET, {
-      expiresIn: "7d",
+
+    await newUser.save();
+
+    res.status(201).json({
+      message: "User registered successfully",
+      user: {
+        name,
+        age,
+        height,
+        weight,
+        gender,
+        mobile,
+        email,
+      },
     });
 
-    res.json({ message: "Registered", user, token });
   } catch (err) {
-    console.error("Register error:", err);
-    res.status(500).json({ message: "Register failed" });
+    console.error("REGISTER ERROR:", err);
+    res.status(500).json({ message: "Server error during registration" });
   }
 });
+
 
 app.post("/login", async (req, res) => {
   try {
@@ -147,7 +147,7 @@ app.post("/login", async (req, res) => {
     const user = await User.findOne({ mobile });
     if (!user) return res.status(401).json({ message: "Invalid credentials" });
 
-    const ok = await bcrypt.compare(password, user.passwordHash);
+    const ok = await bcrypt.compare(password, user.password);
     if (!ok) return res.status(401).json({ message: "Invalid credentials" });
 
     const token = jwt.sign({ id: user._id }, JWT_SECRET, {
@@ -191,24 +191,41 @@ app.post("/ai-evaluate-pdf", upload.single("pdf"), async (req, res) => {
       : {};
 
     const prompt = `
-Return ONLY valid JSON.
-No guessing. No defaults.
+    You are a medical report analysis assistant.
 
-{
-  "overview": "",
-  "evaluation": "",
-  "diet": "",
-  "doctors": [],
-  "furtherDiagnosis": [],
-  "limitations": ""
-}
+    RULES (STRICT):
+    - Do NOT guess values
+    - Do NOT assume missing data
+    - If data is insufficient, say so clearly
+    - Educational purpose only (India context)
+    - Output ONLY valid JSON (no markdown, no explanation)
 
-Patient:
-${JSON.stringify(userMeta)}
+    Return JSON in this EXACT format:
 
-Report:
-${text.slice(0, 6000)}
-`;
+    {
+      "overview": "",
+      "evaluation": "",
+      "diet": "",
+      "doctors": [
+        {
+          "name": "",
+          "specialization": "",
+          "hospital": "",
+          "location": "",
+          "type": "government|private"
+        }
+      ],
+      "furtherDiagnosis": [],
+      "limitations": ""
+    }
+
+    Patient Details:
+    ${JSON.stringify(userMeta, null, 2)}
+
+    Medical Report Text:
+    ${text.slice(0, 4000)}
+    `;
+
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
