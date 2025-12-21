@@ -1,7 +1,6 @@
 // server.js
-// FitTrack backend — FINAL WORKING VERSION (Node 22+ / Render safe)
+// FitTrack backend — FINAL STABLE VERSION (Node 22+ / Render safe)
 
-import User from "./models/User.js";
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -10,9 +9,9 @@ import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import OpenAI from "openai";
-import pdf from "pdf-parse";
+import pdfParse from "pdf-parse/lib/pdf-parse.js";
 
-
+import User from "./models/User.js";
 
 dotenv.config();
 
@@ -27,7 +26,6 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI;
 const JWT_SECRET = process.env.JWT_SECRET || "FITTRACK_FALLBACK_SECRET";
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "JIMMYJAMAI01";
 const FRONTEND_URL = process.env.FRONTEND_URL || "*";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
@@ -90,20 +88,18 @@ mongoose
    ====================== */
 app.post("/register", async (req, res) => {
   try {
-    const { name, age, height, weight, gender, mobile, email, password } = req.body;
+    const { name, age, height, weight, gender, mobile, email, password } =
+      req.body;
 
-    // validation
     if (!name || !age || !height || !weight || !gender || !mobile || !password) {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
-    // optional: prevent duplicate user
     const existingUser = await User.findOne({ mobile });
     if (existingUser) {
       return res.status(200).json({ message: "User already exists" });
     }
 
-    // save user
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const newUser = new User({
@@ -117,28 +113,17 @@ app.post("/register", async (req, res) => {
       password: hashedPassword,
     });
 
-
     await newUser.save();
 
     res.status(201).json({
       message: "User registered successfully",
-      user: {
-        name,
-        age,
-        height,
-        weight,
-        gender,
-        mobile,
-        email,
-      },
+      user: { name, age, height, weight, gender, mobile, email },
     });
-
   } catch (err) {
     console.error("REGISTER ERROR:", err);
     res.status(500).json({ message: "Server error during registration" });
   }
 });
-
 
 app.post("/login", async (req, res) => {
   try {
@@ -156,7 +141,7 @@ app.post("/login", async (req, res) => {
 
     res.json({ message: "Login success", user, token });
   } catch (err) {
-    console.error("Login error:", err);
+    console.error("LOGIN ERROR:", err);
     res.status(500).json({ message: "Login failed" });
   }
 });
@@ -164,20 +149,28 @@ app.post("/login", async (req, res) => {
 /* ======================
    AI PDF EVALUATION
    ====================== */
-app.post("/ai-evaluate-pdf", upload.single("pdf"), async (req, res) => {
+app.post("/ai-evaluate-pdf", upload.single("report"), async (req, res) => {
+  console.log("🟢 AI route hit");
+
   try {
     if (!openai) {
-      return res.status(503).json({ success: false, message: "AI disabled" });
+      return res.status(503).json({
+        success: false,
+        message: "AI disabled (OPENAI_API_KEY missing)",
+      });
     }
 
-    if (!req.file?.buffer) {
-      return res
-        .status(400)
-        .json({ success: false, message: "No PDF uploaded" });
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({
+        success: false,
+        message: "No PDF uploaded",
+      });
     }
 
-    const parsed = await pdf(req.file.buffer);
+    console.log("📄 Parsing PDF...");
+    const parsed = await pdfParse(req.file.buffer);
     const text = (parsed.text || "").replace(/\s+/g, " ").trim();
+    console.log("📝 Extracted text length:", text.length);
 
     if (text.length < 120) {
       return res.json({
@@ -186,61 +179,82 @@ app.post("/ai-evaluate-pdf", upload.single("pdf"), async (req, res) => {
       });
     }
 
-    const userMeta = req.body.userMeta
-      ? JSON.parse(req.body.userMeta)
-      : {};
-
-    const prompt = `
-    You are a medical report analysis assistant.
-
-    RULES (STRICT):
-    - Do NOT guess values
-    - Do NOT assume missing data
-    - If data is insufficient, say so clearly
-    - Educational purpose only (India context)
-    - Output ONLY valid JSON (no markdown, no explanation)
-
-    Return JSON in this EXACT format:
-
-    {
-      "overview": "",
-      "evaluation": "",
-      "diet": "",
-      "doctors": [
-        {
-          "name": "",
-          "specialization": "",
-          "hospital": "",
-          "location": "",
-          "type": "government|private"
-        }
-      ],
-      "furtherDiagnosis": [],
-      "limitations": ""
+    let userMeta = {};
+    try {
+      userMeta = req.body.userMeta ? JSON.parse(req.body.userMeta) : {};
+    } catch {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid userMeta JSON",
+      });
     }
 
-    Patient Details:
-    ${JSON.stringify(userMeta, null, 2)}
+    const prompt = `
+You are a medical report analysis assistant.
 
-    Medical Report Text:
-    ${text.slice(0, 4000)}
-    `;
+RULES (STRICT):
+- Do NOT guess values
+- Do NOT assume missing data
+- If data is insufficient, say so clearly
+- Educational purpose only (India context)
+- Output ONLY valid JSON
 
+Return JSON in this EXACT format:
+{
+  "overview": "",
+  "evaluation": "",
+  "diet": "",
+  "doctors": [
+    {
+      "name": "",
+      "specialization": "",
+      "hospital": "",
+      "location": "",
+      "type": "government|private"
+    }
+  ],
+  "furtherDiagnosis": [],
+  "limitations": ""
+}
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.2,
-    });
+Patient Details:
+${JSON.stringify(userMeta, null, 2)}
+
+Medical Report Text:
+${text.slice(0, 4000)}
+`;
+
+    const completion = await Promise.race([
+      openai.chat.completions.create({
+        model: "gpt-4.1-mini",
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.2,
+      }),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("AI timeout")), 25000)
+      ),
+    ]);
 
     const raw = completion.choices[0].message.content;
 
-    const json = JSON.parse(raw);
+    let json;
+    try {
+      json = JSON.parse(raw);
+    } catch {
+      console.error("❌ AI RAW RESPONSE:", raw);
+      return res.status(500).json({
+        success: false,
+        message: "AI returned invalid JSON",
+      });
+    }
 
-    res.json({ success: true, evaluation: json });
+    return res.json({ success: true, evaluation: json });
   } catch (err) {
-    console.error("AI error:", err);
-    res.status(500).json({ success: false, message: "AI failed" });
+    console.error("❌ AI ROUTE ERROR:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message || "AI evaluation failed",
+    });
   }
 });
 
