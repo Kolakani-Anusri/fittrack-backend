@@ -59,6 +59,7 @@ if (OPENAI_API_KEY) {
    FILE UPLOAD (PDF)
    ====================== */
 const upload = multer({
+  storage: multer.memoryStorage(),
   limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
   fileFilter: (req, file, cb) => {
     if (!file.mimetype.includes("pdf")) {
@@ -171,7 +172,7 @@ const openAI = new OpenAI({
 
 
 app.post("/ai-evaluate-pdf", upload.single("report"), async (req, res) => {
-  console.log("🟢 AI route hit");
+  console.log("🟢 /ai-evaluate-pdf hit");
 
   try {
     if (!openai) {
@@ -184,22 +185,18 @@ app.post("/ai-evaluate-pdf", upload.single("report"), async (req, res) => {
     if (!req.file || !req.file.buffer) {
       return res.status(400).json({
         success: false,
-        message: "No PDF uploaded",
+        message: "No report uploaded",
       });
     }
 
-    console.log("📄 Parsing PDF...");
     const parsed = await pdfParse(req.file.buffer);
 
-    if (!parsed.text || parsed.text.length < 200) {
+    if (!parsed.text || parsed.text.length < 150) {
       return res.json({
         success: false,
-        message: "This PDF appears scanned or unreadable.",
+        message: "This report appears scanned or unreadable",
       });
     }
-
-    const text = parsed.text.replace(/\s+/g, " ").trim();
-    console.log("📝 Extracted text length:", text.length);
 
     let userMeta = {};
     try {
@@ -216,85 +213,63 @@ app.post("/ai-evaluate-pdf", upload.single("report"), async (req, res) => {
     const prompt = `
 You are a medical report analysis assistant.
 
+Analyze the report and return ONLY valid JSON.
+
 TASKS:
-1. Identify abnormal values
-2. Explain each abnormal value
-3. Mention possible conditions (non-diagnostic)
-4. Suggest diet & lifestyle precautions
-5. Suggest doctor specialization
-6. Suggest further tests if needed
+- Identify abnormal values
+- Explain them simply
+- Possible conditions (non-diagnostic)
+- Diet & lifestyle suggestions
+- Doctor specialty
+- Further tests if needed
 
-RULES:
-- Do NOT diagnose
-- Do NOT assume missing data
-- Educational purpose only
-- Indian medical context
-- Output ONLY valid JSON
-
-Return JSON EXACTLY like this:
+FORMAT (STRICT JSON):
 {
   "overview": "",
   "evaluation": "",
   "diet": "",
-  "doctors": [
-    {
-      "name": "",
-      "specialization": "",
-      "hospital": "",
-      "location": "",
-      "type": "government|private"
-    }
-  ],
+  "doctors": [],
   "furtherDiagnosis": [],
   "limitations": ""
 }
 
-Patient Details:
+Patient Info:
 ${JSON.stringify(userMeta, null, 2)}
 
-Medical Report Text:
-${text.slice(0, 3500)}
+Report Text:
+${parsed.text.slice(0, 3500)}
 `;
 
-    const completion = await Promise.race([
-      openai.chat.completions.create({
-        model: "gpt-4o-mini", // ✅ stable
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.2,
-      }),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("AI timeout")), 25000)
-      ),
-    ]);
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.2,
+    });
 
     const raw = completion.choices[0].message.content;
 
-    console.log("🧠 AI RAW RESPONSE ↓↓↓");
-    console.log(raw);
-
-    let json;
+    let data;
     try {
       const match = raw.match(/\{[\s\S]*\}/);
       if (!match) throw new Error("No JSON found");
-      json = JSON.parse(match[0]);
-    } catch (err) {
-      console.error("❌ JSON PARSE FAILED:", err.message);
+      data = JSON.parse(match[0]);
+    } catch {
       return res.json({
         success: false,
-        message: "AI could not understand this report. Try another PDF.",
+        message: "AI could not interpret this report",
       });
     }
 
     return res.json({
       success: true,
-      evaluation: json,
+      evaluation: data,
     });
 
   } catch (err) {
-    console.error("❌ AI ROUTE ERROR:", err);
+    console.error("❌ AI ERROR:", err);
     return res.status(500).json({
       success: false,
-      message: err.message || "AI evaluation failed",
+      message: "AI evaluation failed",
     });
   }
 });
