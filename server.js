@@ -123,8 +123,11 @@ app.post("/register", async (req, res) => {
       user: { name, age, height, weight, gender, mobile, email },
     });
   } catch (err) {
-    console.error("REGISTER ERROR:", err);
-    res.status(500).json({ message: "Server error during registration" });
+    console.error("❌ REGISTER ERROR FULL:", err);
+    res.status(500).json({ 
+      message: "Server error during registration",
+      error: err.message,
+    });
   }
 });
 
@@ -279,51 +282,125 @@ ${text.slice(0, 4000)}
   }
 });
 
+
+
+
 app.post("/ai-diet-workout", async (req, res) => {
   try {
-    if (!openai) {
-      return res.status(503).json({ message: "AI disabled" });
+    const {
+      age,
+      gender,
+      height,
+      weight,
+      bmi,
+      preference = "Vegetarian",
+      healthIssues = []
+    } = req.body;
+
+    if (!age || !gender || !height || !weight || !bmi) {
+      return res.status(400).json({ message: "Missing required fields" });
     }
 
-    const { age, gender, height, weight, bmi, conditions, preference } = req.body;
-
+    // ===============================
+    // 🔥 STRONG STRUCTURED AI PROMPT
+    // ===============================
     const prompt = `
-You are a fitness and nutrition assistant.
+You are an AI fitness trainer and clinical nutritionist.
 
-Create:
-1) Personalized diet plan
-2) Personalized workout plan
+Generate a STRICT JSON response ONLY (no explanation text outside JSON).
 
-User details:
-Age: ${age}
-Gender: ${gender}
-Height: ${height}
-Weight: ${weight}
-BMI: ${bmi}
-Medical Conditions: ${conditions || "None"}
-Food Preference: ${preference || "Vegetarian"}
+USER PROFILE:
+- Age: ${age}
+- Gender: ${gender}
+- Height: ${height} cm
+- Weight: ${weight} kg
+- BMI: ${bmi}
+- Food Preference: ${preference}
+- Health Issues: ${healthIssues.join(", ") || "None"}
 
-Return JSON ONLY:
+RULES:
+- Generate a 7-day plan (Sunday to Saturday)
+- Include meal TIMINGS
+- Include REASONS (why this food is better)
+- Workout must be SAFE based on BMI and gender
+- Use Indian food
+- Vegan = NO milk, curd, paneer, ghee, butter, eggs, meat
+- Diet MUST strictly follow the food preference.
+- Workout intensity MUST match BMI and gender.
+- Be realistic, Indian-friendly, and safe.
+- Avoid medical diagnosis.
+- DO NOT add explanations.
+- DO NOT add markdown.
+- DO NOT add extra text.
+
+JSON FORMAT (MANDATORY):
+
 {
-  "dietPlan": "",
-  "workoutPlan": "",
-  "confidence": "high|medium|low"
+  "weeklyDiet": {
+    "Sunday": {
+      "breakfast": "7:30 AM – Oats porridge with nuts (rich in fiber & iron)",
+      "juice": "10:30 AM – Pomegranate juice (improves hemoglobin)",
+      "lunch": "1:30 PM – Rice + dal + spinach curry (iron rich)",
+      "snack": "5:00 PM – Roasted chana (protein source)",
+      "dinner": "8:00 PM – Chapati + vegetable curry (light & digestible)"
+    }
+  },
+  "weeklyWorkout": {
+    "Sunday": {
+      "activity": "Brisk walking",
+      "duration": "30 minutes",
+      "notes": "Improves metabolism without strain"
+    }
+  },
+  "confidence": "HIGH"
 }
 `;
 
-    const result = await openai.chat.completions.create({
+    // ===============================
+    // 🤖 SINGLE AI CALL
+    // ===============================
+    const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [{ role: "user", content: prompt }],
-      temperature: 0.3,
+      temperature: 0.4,
     });
 
-    res.json(JSON.parse(result.choices[0].message.content));
+    const rawText = completion.choices[0].message.content;
+    console.log("🔵 RAW AI RESPONSE START");
+    console.log(rawText);
+    console.log("🔵 RAW AI RESPONSE END");
+
+
+    // ===============================
+    // 🛡️ SAFE JSON PARSE
+    // ===============================
+    let parsed;
+    try {
+      parsed = JSON.parse(rawText);
+    } catch (e) {
+      console.error("❌ AI JSON PARSE FAILED:", rawText);
+      return res.status(500).json({
+        message: "AI returned invalid format",
+      });
+    }
+
+    // ===============================
+    // ✅ FINAL RESPONSE
+    // ===============================
+    res.json({
+      weeklyDiet: parsed.weeklyDiet,
+      weeklyWorkout: parsed.weeklyWorkout,
+      confidence: parsed.confidence || "HIGH"
+    });
+
   } catch (err) {
+    console.error("❌ AI DIET ERROR:", err);
     res.status(500).json({ message: "Diet/workout AI failed" });
   }
 });
 
 
+   
 /* ======================
    START SERVER
    ====================== */
