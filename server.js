@@ -284,7 +284,6 @@ ${text.slice(0, 4000)}
 
 
 
-
 app.post("/ai-diet-workout", async (req, res) => {
   try {
     const {
@@ -293,63 +292,63 @@ app.post("/ai-diet-workout", async (req, res) => {
       height,
       weight,
       bmi,
-      preference = "Vegetarian",
+      preference,
       healthIssues = []
     } = req.body;
 
-    if (!age || !gender || !height || !weight || !bmi) {
+    if (!age || !gender || !height || !weight || !bmi || !preference) {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
+    const foodPref = preference.trim();
+
     // ===============================
-    // 🔥 STRONG STRUCTURED AI PROMPT
+    // 🔥 STRICT STRUCTURED AI PROMPT
     // ===============================
     const prompt = `
 You are an AI fitness trainer and clinical nutritionist.
 
-Generate a STRICT JSON response ONLY (no explanation text outside JSON).
+IMPORTANT:
+- Respond with ONLY valid JSON
+- NO markdown
+- NO explanations
+- NO extra text
+- STRICTLY follow food preference
+- Fill ALL 7 days (Sunday to Saturday)
 
 USER PROFILE:
-- Age: ${age}
-- Gender: ${gender}
-- Height: ${height} cm
-- Weight: ${weight} kg
-- BMI: ${bmi}
-- Food Preference: ${preference}
-- Health Issues: ${healthIssues.join(", ") || "None"}
+Age: ${age}
+Gender: ${gender}
+Height: ${height} cm
+Weight: ${weight} kg
+BMI: ${bmi}
+Food Preference: ${foodPref}
+Health Issues: ${healthIssues.join(", ") || "None"}
 
 RULES:
-- Generate a 7-day plan (Sunday to Saturday)
 - Include meal TIMINGS
-- Include REASONS (why this food is better)
-- Workout must be SAFE based on BMI and gender
-- Use Indian food
+- Include reason: "because rich in ..."
+- Indian foods only
 - Vegan = NO milk, curd, paneer, ghee, butter, eggs, meat
-- Diet MUST strictly follow the food preference.
-- Workout intensity MUST match BMI and gender.
-- Be realistic, Indian-friendly, and safe.
-- Avoid medical diagnosis.
-- DO NOT add explanations.
-- DO NOT add markdown.
-- DO NOT add extra text.
+- Workout must be SAFE for BMI and gender
 
 JSON FORMAT (MANDATORY):
 
 {
   "weeklyDiet": {
     "Sunday": {
-      "breakfast": "7:30 AM – Oats porridge with nuts (rich in fiber & iron)",
-      "juice": "10:30 AM – Pomegranate juice (improves hemoglobin)",
-      "lunch": "1:30 PM – Rice + dal + spinach curry (iron rich)",
-      "snack": "5:00 PM – Roasted chana (protein source)",
-      "dinner": "8:00 PM – Chapati + vegetable curry (light & digestible)"
+      "breakfast": "time – food (reason)",
+      "juice": "time – juice (reason)",
+      "lunch": "time – food (reason)",
+      "snack": "time – food (reason)",
+      "dinner": "time – food (reason)"
     }
   },
   "weeklyWorkout": {
     "Sunday": {
-      "activity": "Brisk walking",
-      "duration": "30 minutes",
-      "notes": "Improves metabolism without strain"
+      "activity": "exercise",
+      "duration": "xx minutes",
+      "notes": "why suitable"
     }
   },
   "confidence": "HIGH"
@@ -357,36 +356,51 @@ JSON FORMAT (MANDATORY):
 `;
 
     // ===============================
-    // 🤖 SINGLE AI CALL
+    // 🤖 AI CALL
     // ===============================
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [{ role: "user", content: prompt }],
-      temperature: 0.4,
+      temperature: 0.35
     });
 
-    const rawText = completion.choices[0].message.content;
+    const raw = completion.choices[0].message.content;
+
     console.log("🔵 RAW AI RESPONSE START");
-    console.log(rawText);
+    console.log(raw);
     console.log("🔵 RAW AI RESPONSE END");
 
+    // ===============================
+    // 🛡️ SAFE JSON EXTRACTION
+    // ===============================
+    let jsonText = raw.trim();
 
-    // ===============================
-    // 🛡️ SAFE JSON PARSE
-    // ===============================
+    // If AI adds text accidentally, extract JSON block
+    if (!jsonText.startsWith("{")) {
+      const match = jsonText.match(/\{[\s\S]*\}/);
+      if (match) jsonText = match[0];
+    }
+
     let parsed;
     try {
-      parsed = JSON.parse(rawText);
+      parsed = JSON.parse(jsonText);
     } catch (e) {
-      console.error("❌ AI JSON PARSE FAILED:", rawText);
+      console.error("❌ AI JSON PARSE FAILED");
+      console.error(jsonText);
       return res.status(500).json({
-        message: "AI returned invalid format",
+        message: "AI returned invalid JSON format"
       });
     }
 
     // ===============================
-    // ✅ FINAL RESPONSE
+    // ✅ FINAL VALIDATION
     // ===============================
+    if (!parsed.weeklyDiet || !parsed.weeklyWorkout) {
+      return res.status(500).json({
+        message: "AI response incomplete"
+      });
+    }
+
     res.json({
       weeklyDiet: parsed.weeklyDiet,
       weeklyWorkout: parsed.weeklyWorkout,
@@ -398,6 +412,8 @@ JSON FORMAT (MANDATORY):
     res.status(500).json({ message: "Diet/workout AI failed" });
   }
 });
+
+
 
 
    
