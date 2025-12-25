@@ -241,7 +241,8 @@ ${text.slice(0, 4000)}
 
     const completion = await Promise.race([
       openai.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: "gpt-4.1-mini",
+        input: prompt,
         messages: [{ role: "user", content: prompt }],
         temperature: 0.2,
       }),
@@ -300,105 +301,65 @@ app.post("/ai-diet-workout", async (req, res) => {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
-    const foodPref = preference.trim();
-
-    // ===============================
-    // 🔥 STRICT STRUCTURED AI PROMPT
-    // ===============================
     const prompt = `
 You are an AI fitness trainer and clinical nutritionist.
 
-IMPORTANT:
-- Respond with ONLY valid JSON
-- NO markdown
-- NO explanations
-- NO extra text
-- STRICTLY follow food preference
-- Fill ALL 7 days (Sunday to Saturday)
+Return ONLY valid JSON. No markdown. No explanations.
 
-USER PROFILE:
+User:
 Age: ${age}
 Gender: ${gender}
 Height: ${height} cm
 Weight: ${weight} kg
 BMI: ${bmi}
-Food Preference: ${foodPref}
+Food Preference: ${preference}
 Health Issues: ${healthIssues.join(", ") || "None"}
 
-RULES:
-- Include meal TIMINGS
-- Include reason: "because rich in ..."
+Rules:
+- 7 day plan (Sunday–Saturday)
+- Include meal timing
+- Include "because rich in ..."
 - Indian foods only
-- Vegan = NO milk, curd, paneer, ghee, butter, eggs, meat
-- Workout must be SAFE for BMI and gender
+- Vegan: NO milk, curd, paneer, ghee, butter, eggs, meat
+- Follow food preference strictly
 
-JSON FORMAT (MANDATORY):
+JSON FORMAT:
 
 {
   "weeklyDiet": {
     "Sunday": {
-      "breakfast": "time – food (reason)",
-      "juice": "time – juice (reason)",
-      "lunch": "time – food (reason)",
-      "snack": "time – food (reason)",
-      "dinner": "time – food (reason)"
+      "breakfast": "",
+      "juice": "",
+      "lunch": "",
+      "snack": "",
+      "dinner": ""
     }
   },
   "weeklyWorkout": {
     "Sunday": {
-      "activity": "exercise",
-      "duration": "xx minutes",
-      "notes": "why suitable"
+      "activity": "",
+      "duration": "",
+      "notes": ""
     }
   },
   "confidence": "HIGH"
 }
 `;
 
-    // ===============================
-    // 🤖 AI CALL
-    // ===============================
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.35
+    // ✅ CORRECT OPENAI v4 CALL
+    const response = await openai.responses.create({
+      model: "gpt-4.1-mini",
+      input: prompt
     });
 
-    const raw = completion.choices[0].message.content;
-
-    console.log("🔵 RAW AI RESPONSE START");
-    console.log(raw);
-    console.log("🔵 RAW AI RESPONSE END");
-
-    // ===============================
-    // 🛡️ SAFE JSON EXTRACTION
-    // ===============================
-    let jsonText = raw.trim();
-
-    // If AI adds text accidentally, extract JSON block
-    if (!jsonText.startsWith("{")) {
-      const match = jsonText.match(/\{[\s\S]*\}/);
-      if (match) jsonText = match[0];
-    }
+    const raw = response.output_text;
 
     let parsed;
     try {
-      parsed = JSON.parse(jsonText);
-    } catch (e) {
-      console.error("❌ AI JSON PARSE FAILED");
-      console.error(jsonText);
-      return res.status(500).json({
-        message: "AI returned invalid JSON format"
-      });
-    }
-
-    // ===============================
-    // ✅ FINAL VALIDATION
-    // ===============================
-    if (!parsed.weeklyDiet || !parsed.weeklyWorkout) {
-      return res.status(500).json({
-        message: "AI response incomplete"
-      });
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      console.error("AI JSON parse failed:", raw);
+      return res.status(500).json({ message: "Invalid AI response format" });
     }
 
     res.json({
@@ -408,7 +369,7 @@ JSON FORMAT (MANDATORY):
     });
 
   } catch (err) {
-    console.error("❌ AI DIET ERROR:", err);
+    console.error("AI diet/workout error:", err);
     res.status(500).json({ message: "Diet/workout AI failed" });
   }
 });
