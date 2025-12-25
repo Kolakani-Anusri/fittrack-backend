@@ -6,14 +6,14 @@ import OpenAI from "openai";
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import multer from "multer";
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import OpenAI from "openai";
 import pdfParse from "pdf-parse/lib/pdf-parse.js";
-
 import User from "./models/User.js";
+
+import multer from "multer";
 
 dotenv.config();
 
@@ -159,6 +159,17 @@ app.post("/login", async (req, res) => {
 /* ======================
    AI PDF EVALUATION
    ====================== */
+import fs from "fs";
+import pdf from "pdf-parse";
+import OpenAI from "openai";
+
+const openAI = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+
+
+
 app.post("/ai-evaluate-pdf", upload.single("report"), async (req, res) => {
   console.log("🟢 AI route hit");
 
@@ -179,26 +190,22 @@ app.post("/ai-evaluate-pdf", upload.single("report"), async (req, res) => {
 
     console.log("📄 Parsing PDF...");
     const parsed = await pdfParse(req.file.buffer);
+
     if (!parsed.text || parsed.text.length < 200) {
-      return res.status(200).json({
-        success: false,
-        message: "This PDF looks scanned or unreadable.",
-      });
-    }
-
-    const text = (parsed.text || "").replace(/\s+/g, " ").trim();
-    console.log("📝 Extracted text length:", text.length);
-
-    if (text.length < 120) {
       return res.json({
         success: false,
-        message: "Unreadable or scanned report",
+        message: "This PDF appears scanned or unreadable.",
       });
     }
+
+    const text = parsed.text.replace(/\s+/g, " ").trim();
+    console.log("📝 Extracted text length:", text.length);
 
     let userMeta = {};
     try {
-      userMeta = req.body.userMeta ? JSON.parse(req.body.userMeta) : {};
+      userMeta = req.body.userMeta
+        ? JSON.parse(req.body.userMeta)
+        : {};
     } catch {
       return res.status(400).json({
         success: false,
@@ -209,14 +216,22 @@ app.post("/ai-evaluate-pdf", upload.single("report"), async (req, res) => {
     const prompt = `
 You are a medical report analysis assistant.
 
-RULES (STRICT):
-- Do NOT guess values
+TASKS:
+1. Identify abnormal values
+2. Explain each abnormal value
+3. Mention possible conditions (non-diagnostic)
+4. Suggest diet & lifestyle precautions
+5. Suggest doctor specialization
+6. Suggest further tests if needed
+
+RULES:
+- Do NOT diagnose
 - Do NOT assume missing data
-- If data is insufficient, say so clearly
-- Educational purpose only (India context)
+- Educational purpose only
+- Indian medical context
 - Output ONLY valid JSON
 
-Return JSON in this EXACT format:
+Return JSON EXACTLY like this:
 {
   "overview": "",
   "evaluation": "",
@@ -238,13 +253,12 @@ Patient Details:
 ${JSON.stringify(userMeta, null, 2)}
 
 Medical Report Text:
-${text.slice(0, 4000)}
+${text.slice(0, 3500)}
 `;
 
     const completion = await Promise.race([
       openai.chat.completions.create({
-        model: "gpt-4.1-mini",
-        input: prompt,
+        model: "gpt-4o-mini", // ✅ stable
         messages: [{ role: "user", content: prompt }],
         temperature: 0.2,
       }),
@@ -258,24 +272,24 @@ ${text.slice(0, 4000)}
     console.log("🧠 AI RAW RESPONSE ↓↓↓");
     console.log(raw);
 
-    // Safely extract JSON from AI response
     let json;
     try {
       const match = raw.match(/\{[\s\S]*\}/);
-      if (!match) {
-        throw new Error("No JSON found in AI response");
-      }
+      if (!match) throw new Error("No JSON found");
       json = JSON.parse(match[0]);
     } catch (err) {
       console.error("❌ JSON PARSE FAILED:", err.message);
-      return res.status(200).json({
+      return res.json({
         success: false,
-        message: "AI could not understand this report. Please try another PDF.",
+        message: "AI could not understand this report. Try another PDF.",
       });
     }
 
+    return res.json({
+      success: true,
+      evaluation: json,
+    });
 
-    return res.json({ success: true, evaluation: json });
   } catch (err) {
     console.error("❌ AI ROUTE ERROR:", err);
     return res.status(500).json({
@@ -287,6 +301,9 @@ ${text.slice(0, 4000)}
 
 
 
+// ===============================
+// AI DIET & WORKOUT ROUTE (FINAL)
+// ===============================
 app.post("/ai-diet-workout", async (req, res) => {
   try {
     const {
@@ -303,75 +320,140 @@ app.post("/ai-diet-workout", async (req, res) => {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
+    
+    // -------------------------------
+    // BMI BASED GOAL
+    // -------------------------------
+    let fitnessGoal = "maintenance";
+    if (bmi >= 25) fitnessGoal = "weight_loss";
+    else if (bmi < 18.5) fitnessGoal = "weight_gain";
+
+
+    // 🚫 STRICT VEGAN BLOCK LIST
+    const veganForbidden = [
+      "milk", "curd", "paneer", "cheese", "butter", "ghee",
+      "yogurt", "cream", "egg", "eggs", "chicken", "fish",
+      "mutton", "meat", "honey", ""
+    ];
+
+    const isVegan = preference.toLowerCase() === "vegan";
+
+
+
     const prompt = `
-You are an AI fitness trainer and clinical nutritionist.
+    You are an AI fitness trainer and clinical nutritionist.
 
-Return ONLY valid JSON. No markdown. No explanations.
+    STRICT RULE:
+    Return ONLY valid JSON. No explanations, no markdown.
 
-User:
-Age: ${age}
-Gender: ${gender}
-Height: ${height} cm
-Weight: ${weight} kg
-BMI: ${bmi}
-Food Preference: ${preference}
-Health Issues: ${healthIssues.join(", ") || "None"}
+    USER PROFILE:
+    Age: ${age}
+    Gender: ${gender}
+    Height: ${height} cm
+    Weight: ${weight} kg
+    BMI: ${bmi}
+    Food Preference: ${preference}
+    Health Issues: ${healthIssues.join(", ") || "None"}
 
-Rules:
-- 7 day plan (Sunday–Saturday)
-- Include meal timing
-- Include "because rich in ..."
-- Indian foods only
-- Vegan: NO milk, curd, paneer, ghee, butter, eggs, meat
-- Follow food preference strictly
+    DECISION LOGIC (MANDATORY):
+    1. Determine FITNESS GOAL using BMI:
+      - BMI < 18.5 → Weight Gain
+      - BMI 18.5–24.9 → Weight Maintenance
+      - BMI ≥ 25 → Weight Loss
 
-JSON FORMAT:
+    2. Modify BOTH diet and workout based on:
+      - Gender (safety, intensity)
+      - Health Issues (PCOS, Thyroid, Diabetes, Anemia, etc.)
 
-{
-  "weeklyDiet": {
-    "Sunday": {
-      "breakfast": "",
-      "juice": "",
-      "lunch": "",
-      "snack": "",
-      "dinner": ""
+    3. Health issues take PRIORITY over BMI goals.
+
+    DIET RULES:
+    - Follow food preference strictly.
+    - Vegan → NO milk, curd, paneer, butter, ghee, eggs, meat.
+    - Indian foods only.
+    - Mention WHY each food is chosen (nutrients, health benefit).
+    - Include meal timing ONLY in column headers (not inside food text).
+
+    WORKOUT RULES:
+    - Separate workouts for Weight Loss / Gain / Maintenance.
+    - Adjust intensity by gender.
+    - Avoid unsafe exercises for health issues.
+    - Include purpose of workout.
+
+    OUTPUT JSON FORMAT (STRICT):
+
+    {
+      "fitnessGoal": "Weight Loss | Weight Gain | Maintenance",
+      "healthFocus": ["PCOS", "Thyroid", "None"],
+
+      "weeklyDiet": {
+        "Sunday": {
+          "breakfast": "Food (reason)",
+          "juice": "Drink (reason)",
+          "lunch": "Meal (reason)",
+          "snack": "Snack (reason)",
+          "dinner": "Dinner (reason)"
+        }
+      },
+
+      "weeklyWorkout": {
+        "Sunday": {
+          "goalType": "Weight Loss | Weight Gain | Maintenance",
+          "activity": "Workout name",
+          "duration": "Time",
+          "intensity": "Low | Moderate | High",
+          "notes": "Why this workout is suitable"
+        }
+      },
+
+      "confidence": "HIGH"
     }
-  },
-  "weeklyWorkout": {
-    "Sunday": {
-      "activity": "",
-      "duration": "",
-      "notes": ""
-    }
-  },
-  "confidence": "HIGH"
-}
-`;
+    `;
 
-    // ✅ CORRECT OPENAI v4 CALL
+
+    // 🤖 AI CALL
     const response = await openai.responses.create({
       model: "gpt-4.1-mini",
       input: prompt
     });
 
     const raw = response.output_text;
+    console.log("🔵 AI RAW RESPONSE:\n", raw);
 
     let parsed;
     try {
       parsed = JSON.parse(raw);
-    } catch (err) {
-      console.error("AI JSON parse failed:", raw);
-      return res.status(500).json({ message: "Invalid AI response format" });
+    } catch (e) {
+      return res.status(500).json({ message: "AI returned invalid JSON" });
     }
 
+    // ===============================
+    // 🧹 FINAL VEGAN SANITIZER (SERVER-SIDE)
+    // ===============================
+    if (isVegan && parsed.weeklyDiet) {
+      for (const day in parsed.weeklyDiet) {
+        for (const meal in parsed.weeklyDiet[day]) {
+          let value = parsed.weeklyDiet[day][meal];
+
+          veganForbidden.forEach(word => {
+            const regex = new RegExp(`\\b${word}\\b`, "gi");
+            value = value.replace(regex, "plant-based alternative");
+          });
+
+          parsed.weeklyDiet[day][meal] = value;
+        }
+      }
+    }
+
+    // ✅ SEND FINAL SAFE RESPONSE
     res.json({
-      weeklyDiet: parsed.weeklyDiet,
-      weeklyWorkout: parsed.weeklyWorkout,
+      weeklyDiet: parsed.weeklyDiet || {},
+      weeklyWorkout: parsed.weeklyWorkout || {},
       confidence: parsed.confidence || "HIGH"
     });
 
   } catch (err) {
-    console.error("AI diet/workout error:", err);
+    console.error("❌ AI DIET ERROR:", err);
     res.status(500).json({ message: "Diet/workout AI failed" });
   }
 });
