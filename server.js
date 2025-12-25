@@ -1,6 +1,8 @@
 // server.js
 // FitTrack backend — FINAL STABLE VERSION (Node 22+ / Render safe)
 
+
+import OpenAI from "openai";
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
