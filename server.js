@@ -33,22 +33,13 @@ const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI;
 const JWT_SECRET = process.env.JWT_SECRET || "FITTRACK_FALLBACK_SECRET";
 const FRONTEND_URL = process.env.FRONTEND_URL || "*";
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 
-/* ======================
-   OPENAI CLIENT
-   ====================== */
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-let openai = null;
 
-if (OPENAI_API_KEY) {
-  openai = new OpenAI({
-    apiKey: OPENAI_API_KEY,
-  });
-} else {
-  console.warn("⚠️ OPENAI_API_KEY not set — AI disabled");
-}
 /* ======================
    MIDDLEWARE
    ====================== */
