@@ -17,6 +17,8 @@ import pdf from "pdf-parse";
 import multer from "multer";
 
 
+
+
 dotenv.config();
 
 /* ======================
@@ -229,6 +231,9 @@ app.post("/ai-evaluate-pdf", upload.single("report"), async (req, res) => {
       });
     }
 
+    // ----------------------------
+    // USER META
+    // ----------------------------
     let userMeta = {};
     try {
       userMeta = req.body.userMeta
@@ -241,6 +246,9 @@ app.post("/ai-evaluate-pdf", upload.single("report"), async (req, res) => {
       });
     }
 
+    // ----------------------------
+    // PROMPT
+    // ----------------------------
     const prompt = `
 You are a medical report analysis assistant.
 
@@ -272,13 +280,27 @@ ${parsed.text.slice(0, 3500)}
 `;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-4.1-mini",
       messages: [{ role: "user", content: prompt }],
       temperature: 0.2,
     });
 
     const raw = completion.choices[0].message.content;
 
+    // ----------------------------
+    // OPENAI CALL (CORRECT API)
+    // ----------------------------
+    const response = await openai.responses.create({
+      model: "gpt-4.1-mini",
+      input: prompt,
+    });
+
+    console.log("🔵 AI RAW RESPONSE:\n", raw);
+
+
+    // ----------------------------
+    // JSON EXTRACTION
+    // ----------------------------
     let data;
     try {
       const match = raw.match(/\{[\s\S]*\}/);
@@ -291,6 +313,9 @@ ${parsed.text.slice(0, 3500)}
       });
     }
 
+    // ----------------------------
+    // SUCCESS RESPONSE
+    // ----------------------------
     return res.json({
       success: true,
       evaluation: data,
