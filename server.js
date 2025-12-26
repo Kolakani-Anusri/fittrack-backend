@@ -11,7 +11,7 @@ import jwt from "jsonwebtoken";
 import OpenAI from "openai";
 import pdfParse from "pdf-parse/lib/pdf-parse.js";
 import User from "./models/User.js";
-import OpenAI from "openai";
+
 import fs from "fs";
 import pdf from "pdf-parse";
 import multer from "multer";
@@ -31,11 +31,13 @@ const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI;
 const JWT_SECRET = process.env.JWT_SECRET || "FITTRACK_FALLBACK_SECRET";
 const FRONTEND_URL = process.env.FRONTEND_URL || "*";
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+
 
 /* ======================
    OPENAI CLIENT
    ====================== */
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+
 let openai = null;
 
 if (OPENAI_API_KEY) {
@@ -59,9 +61,7 @@ app.get("/", (req, res) => {
   res.json({ message: "✅ FitTrack backend running" });
 });
 
-/* ======================
-   OPENAI CLIENT
-   ====================== */
+
 
 
 /* ======================
