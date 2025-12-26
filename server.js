@@ -98,33 +98,63 @@ mongoose
 /* ======================
     AUTH ROUTES
    ====================== */
+// Registration Route
+
 app.post("/register", async (req, res) => {
   try {
-    const { name, age, height, weight, gender, email } = req.body;
+    const {
+      name,
+      age,
+      height,
+      weight,
+      gender,
+      mobile,
+      email,
+      password
+    } = req.body;
 
-    if (!name || !age || !height || !weight || !gender || !email) {
+    // ✅ Validation
+    if (
+      !name ||
+      !age ||
+      !height ||
+      !weight ||
+      !gender ||
+      !mobile ||
+      !email ||
+      !password
+    ) {
       return res.status(400).json({
         success: false,
-        message: "All fields including email are required",
+        message: "All fields are required",
       });
     }
 
-    // Check existing user
-    const existingUser = await User.findOne({ email });
+    // ✅ Check existing user (email OR mobile)
+    const existingUser = await User.findOne({
+      $or: [{ email }, { mobile }],
+    });
+
     if (existingUser) {
       return res.status(409).json({
         success: false,
-        message: "User already registered with this email",
+        message: "User already registered",
       });
     }
 
+    // ✅ Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // ✅ Create user
     const user = new User({
       name,
       age,
       height,
       weight,
       gender,
+      mobile,
       email,
+      password: hashedPassword,
     });
 
     await user.save();
@@ -132,7 +162,6 @@ app.post("/register", async (req, res) => {
     res.json({
       success: true,
       message: "Registration successful",
-      user,
     });
 
   } catch (err) {
