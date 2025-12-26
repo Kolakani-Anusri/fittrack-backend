@@ -2,7 +2,6 @@
 // FitTrack backend — FINAL STABLE VERSION (Node 22+ / Render safe)
 
 
-import OpenAI from "openai";
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -12,8 +11,11 @@ import jwt from "jsonwebtoken";
 import OpenAI from "openai";
 import pdfParse from "pdf-parse/lib/pdf-parse.js";
 import User from "./models/User.js";
-
+import OpenAI from "openai";
+import fs from "fs";
+import pdf from "pdf-parse";
 import multer from "multer";
+
 
 dotenv.config();
 
@@ -32,6 +34,18 @@ const FRONTEND_URL = process.env.FRONTEND_URL || "*";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 /* ======================
+   OPENAI CLIENT
+   ====================== */
+let openai = null;
+
+if (OPENAI_API_KEY) {
+  openai = new OpenAI({
+    apiKey: OPENAI_API_KEY,
+  });
+} else {
+  console.warn("⚠️ OPENAI_API_KEY not set — AI disabled");
+}
+/* ======================
    MIDDLEWARE
    ====================== */
 app.use(cors({ origin: FRONTEND_URL }));
@@ -48,12 +62,7 @@ app.get("/", (req, res) => {
 /* ======================
    OPENAI CLIENT
    ====================== */
-let openai = null;
-if (OPENAI_API_KEY) {
-  openai = new OpenAI({ apiKey: OPENAI_API_KEY });
-} else {
-  console.warn("⚠️ OPENAI_API_KEY not set — AI disabled");
-}
+
 
 /* ======================
    FILE UPLOAD (PDF)
@@ -91,48 +100,50 @@ mongoose
    ====================== */
 app.post("/register", async (req, res) => {
   try {
-    const { name, age, height, weight, gender, mobile, email, password } =
-      req.body;
+    const { name, age, height, weight, gender, email } = req.body;
 
-    if (!name || !age || !height || !weight || !gender || !mobile || !password) {
-      return res.status(400).json({ message: "Missing required fields" });
-    }
-
-    const existingUser = await User.findOne({ mobile });
-
-    if (existingUser) {
-      return res.status(200).json({
-        message: "User already registered. Please login."
+    if (!name || !age || !height || !weight || !gender || !email) {
+      return res.status(400).json({
+        success: false,
+        message: "All fields including email are required",
       });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    // Check existing user
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        message: "User already registered with this email",
+      });
+    }
 
-    const newUser = new User({
+    const user = new User({
       name,
       age,
       height,
       weight,
       gender,
-      mobile,
       email,
-      password: hashedPassword,
     });
 
-    await newUser.save();
+    await user.save();
 
-    res.status(201).json({
-      message: "User registered successfully",
-      user: { name, age, height, weight, gender, mobile, email },
+    res.json({
+      success: true,
+      message: "Registration successful",
+      user,
     });
+
   } catch (err) {
-    console.error("❌ REGISTER ERROR FULL:", err);
-    res.status(500).json({ 
+    console.error("Register error:", err);
+    res.status(500).json({
+      success: false,
       message: "Server error during registration",
-      error: err.message,
     });
   }
 });
+
 
 
 // Login Route
@@ -160,15 +171,6 @@ app.post("/login", async (req, res) => {
 /* ======================
    AI PDF EVALUATION
    ====================== */
-import fs from "fs";
-import pdf from "pdf-parse";
-import OpenAI from "openai";
-
-const openAI = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-
 
 
 app.post("/ai-evaluate-pdf", upload.single("report"), async (req, res) => {
@@ -432,10 +434,6 @@ app.post("/ai-diet-workout", async (req, res) => {
     res.status(500).json({ message: "Diet/workout AI failed" });
   }
 });
-
-
-
-
    
 /* ======================
    START SERVER
