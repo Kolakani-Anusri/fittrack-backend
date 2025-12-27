@@ -196,7 +196,7 @@ app.post("/login", async (req, res) => {
 
 
 app.post("/ai-evaluate-pdf", upload.single("report"), async (req, res) => {
-  console.log("🟢 /ai-evaluate-pdf hit");
+  console.log("🔥 AI ROUTE VERSION = v3-rate-limit-fix");
 
   try {
     if (!openai) {
@@ -278,13 +278,6 @@ ${parsed.text.slice(0, 3500)}
 
     const raw = completion.choices[0].message.content;
 
-    // ----------------------------
-    // OPENAI CALL (CORRECT API)
-    // ----------------------------
-    const response = await openai.responses.create({
-      model: "gpt-4.1-mini",
-      input: prompt,
-    });
 
     console.log("🔵 AI RAW RESPONSE:\n", raw);
 
@@ -312,8 +305,18 @@ ${parsed.text.slice(0, 3500)}
       evaluation: data,
     });
 
-  } catch (err) {
+  } 
+  catch (err) {
     console.error("❌ AI ERROR:", err);
+
+    // OpenAI rate limit
+    if (err?.code === "rate_limit_exceeded") {
+      return res.status(429).json({
+        success: false,
+        message: "AI is busy right now. Please wait 1 minute and try again.",
+      });
+    }
+
     return res.status(500).json({
       success: false,
       message: "AI evaluation failed",
