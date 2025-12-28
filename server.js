@@ -278,7 +278,7 @@ ${parsed.text.slice(0, 3500)}
 `;
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4.1-mini",
+      model: "gpt-4o-mini",
       messages: [{ role: "user", content: prompt }],
       temperature: 0.2,
     });
@@ -343,7 +343,6 @@ ${parsed.text.slice(0, 3500)}
 // ===============================
 app.post("/ai-diet-workout", async (req, res) => {
   console.log("🟢 /ai-diet-workout HIT");
-  console.log("📦 Body:", req.body);
 
   try {
     if (!openai) {
@@ -355,35 +354,25 @@ app.post("/ai-diet-workout", async (req, res) => {
 
     const { age, gender, height, weight, bmi, preference } = req.body;
 
-    if (!age || !gender || !height || !weight || !bmi) {
-      return res.status(400).json({
-        success: false,
-        message: "Missing required user details",
-      });
-    }
-
     const prompt = `
 Create a personalized DIET PLAN and WORKOUT PLAN.
 
 User details:
-- Age: ${age}
-- Gender: ${gender}
-- Height: ${height}
-- Weight: ${weight}
-- BMI: ${bmi}
-- Food Preference: ${preference}
+Age: ${age}
+Gender: ${gender}
+Height: ${height}
+Weight: ${weight}
+BMI: ${bmi}
+Food Preference: ${preference}
 
 Rules:
-- Vegetarian diet if preference is vegetarian
-- Safe for beginners
-- Simple Indian food
-- Home workouts (no gym mandatory)
 - Indian food
 - Simple meals
 - Beginner friendly workouts
 - Home-based exercises
 
-Format response exactly as:
+Format strictly as:
+
 DIET PLAN:
 <diet>
 
@@ -391,18 +380,19 @@ WORKOUT PLAN:
 <workout>
 `;
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-4.1-mini",
+    const response = await openai.responses.create({
+      model: "gpt-4o-mini",
       input: prompt,
     });
 
-    const text = response.output_text;
+    const text = response.output?.[0]?.content?.[0]?.text;
 
     if (!text) {
-      throw new Error("Empty AI response");
+      throw new Error("AI returned empty response");
     }
 
-    const dietPlan = text.split("WORKOUT PLAN:")[0]
+    const dietPlan = text
+      .split("WORKOUT PLAN:")[0]
       .replace("DIET PLAN:", "")
       .trim();
 
@@ -415,13 +405,14 @@ WORKOUT PLAN:
     });
 
   } catch (err) {
-    console.error("❌ AI Diet Error:", err);
+    console.error("❌ Diet AI error:", err.message);
     res.status(500).json({
       success: false,
       message: "AI failed to generate plan",
     });
   }
 });
+
 
    
 /* ======================
