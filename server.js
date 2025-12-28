@@ -338,40 +338,65 @@ ${parsed.text.slice(0, 3500)}
 
 
 
-// ===============================
-// AI DIET & WORKOUT ROUTE (FINAL)
-// ===============================
+// ================================
+// AI: DIET & WORKOUT PLAN
+// ================================
+
+// simple server-side cooldown (1 request per minute)
+let lastDietCallTime = 0;
+
 app.post("/ai-diet-workout", async (req, res) => {
   console.log("🟢 /ai-diet-workout HIT");
 
   try {
+    // Safety: OpenAI check
     if (!openai) {
       return res.status(503).json({
         success: false,
-        message: "AI disabled",
+        message: "AI service unavailable",
       });
     }
 
+    // ⏱️ Rate-limit (1 minute)
+    const now = Date.now();
+    if (now - lastDietCallTime < 60_000) {
+      return res.status(429).json({
+        success: false,
+        message: "Please wait 1 minute before generating again",
+      });
+    }
+    lastDietCallTime = now;
+
     const { age, gender, height, weight, bmi, preference } = req.body;
 
-    const prompt = `
-Create a personalized DIET PLAN and WORKOUT PLAN.
+    // Basic validation
+    if (!age || !gender || !height || !weight || !bmi) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required user details",
+      });
+    }
 
-User details:
+    // 🎯 SHORT & SAFE PROMPT (very important)
+    const prompt = `
+Create a clear DIET PLAN and WORKOUT PLAN.
+
+User:
 Age: ${age}
 Gender: ${gender}
-Height: ${height}
-Weight: ${weight}
+Height: ${height} cm
+Weight: ${weight} kg
 BMI: ${bmi}
-Food Preference: ${preference}
+Food preference: ${preference}
 
 Rules:
-- Indian food
+- Indian foods
 - Simple meals
-- Beginner friendly workouts
-- Home-based exercises
+- Beginner friendly
+- Home workouts only
+- Bullet points only
 
-Format strictly as:
+Format exactly like this:
 
 DIET PLAN:
 <diet>
@@ -383,30 +408,46 @@ WORKOUT PLAN:
     const response = await openai.responses.create({
       model: "gpt-4o-mini",
       input: prompt,
+      max_output_tokens: 700,
+      temperature: 0.5,
     });
 
-    const text = response.output?.[0]?.content?.[0]?.text;
+    // 🧠 Safe extraction
+    const text =
+      response.output?.[0]?.content?.[0]?.text ||
+      response.output_text;
 
     if (!text) {
-      throw new Error("AI returned empty response");
+      throw new Error("Empty AI response");
     }
 
+    // Split sections
     const dietPlan = text
       .split("WORKOUT PLAN:")[0]
       .replace("DIET PLAN:", "")
       .trim();
 
-    const workoutPlan = text.split("WORKOUT PLAN:")[1]?.trim();
+    const workoutPlan =
+      text.split("WORKOUT PLAN:")[1]?.trim() || "";
 
-    res.json({
+    return res.json({
       success: true,
       dietPlan,
       workoutPlan,
     });
 
   } catch (err) {
-    console.error("❌ Diet AI error:", err.message);
-    res.status(500).json({
+    console.error("❌ Diet AI error:", err);
+
+    // Handle OpenAI rate limit properly
+    if (err.status === 429) {
+      return res.status(429).json({
+        success: false,
+        message: "AI is busy. Please try again after a minute.",
+      });
+    }
+
+    return res.status(500).json({
       success: false,
       message: "AI failed to generate plan",
     });
