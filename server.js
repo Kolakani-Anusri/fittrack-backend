@@ -343,14 +343,13 @@ ${parsed.text.slice(0, 3500)}
 // ===============================
 app.post("/ai-diet-workout", async (req, res) => {
   console.log("🟢 /ai-diet-workout HIT");
-  console.log("📦 Request body:", req.body);
+  console.log("📦 Body:", req.body);
 
   try {
     if (!openai) {
-      console.error("❌ OpenAI not initialized");
       return res.status(503).json({
         success: false,
-        message: "AI disabled (OPENAI_API_KEY missing)",
+        message: "AI disabled",
       });
     }
 
@@ -379,6 +378,10 @@ Rules:
 - Safe for beginners
 - Simple Indian food
 - Home workouts (no gym mandatory)
+- Indian food
+- Simple meals
+- Beginner friendly workouts
+- Home-based exercises
 
 Format response exactly as:
 DIET PLAN:
@@ -390,11 +393,10 @@ WORKOUT PLAN:
 
     const response = await openai.chat.completions.create({
       model: "gpt-4.1-mini",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.4,
+      input: prompt,
     });
 
-    const text = response.choices?.[0]?.message?.content;
+    const text = response.output_text;
 
     if (!text) {
       throw new Error("Empty AI response");
@@ -413,8 +415,7 @@ WORKOUT PLAN:
     });
 
   } catch (err) {
-    console.error("❌ AI Diet Error:", err.message);
-    console.error(err);
+    console.error("❌ AI Diet Error:", err);
     res.status(500).json({
       success: false,
       message: "AI failed to generate plan",
