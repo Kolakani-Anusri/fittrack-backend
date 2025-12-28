@@ -33,12 +33,19 @@ const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI;
 const JWT_SECRET = process.env.JWT_SECRET || "FITTRACK_FALLBACK_SECRET";
 const FRONTEND_URL = process.env.FRONTEND_URL || "*";
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
 
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
+let openai = null;
 
+if (OPENAI_API_KEY) {
+  openai = new OpenAI({
+    apiKey: OPENAI_API_KEY,
+  });
+  console.log("✅ OpenAI initialized");
+} else {
+  console.warn("⚠️ OPENAI_API_KEY missing — AI disabled");
+}
 
 /* ======================
    MIDDLEWARE
@@ -307,19 +314,24 @@ ${parsed.text.slice(0, 3500)}
 
   } 
   catch (err) {
-    console.error("❌ AI ERROR:", err);
+    console.error("❌ AI ERROR RAW:", err);
 
-    // OpenAI rate limit
-    if (err?.code === "rate_limit_exceeded") {
+    // FORCE HANDLE RATE LIMIT (ALL CASES)
+    if (
+      err?.code === "rate_limit_exceeded" ||
+      err?.error?.code === "rate_limit_exceeded" ||
+      String(err?.message || "").includes("rate limit")
+    ) {
       return res.status(429).json({
         success: false,
-        message: "AI is busy right now. Please wait 1 minute and try again.",
+        message: "AI busy. Please wait 60 seconds and retry.",
       });
     }
 
-    return res.status(500).json({
+    // LAST RESORT — NEVER LIE WITH 500
+    return res.status(200).json({
       success: false,
-      message: "AI evaluation failed",
+      message: "AI unavailable right now.",
     });
   }
 });
@@ -330,158 +342,86 @@ ${parsed.text.slice(0, 3500)}
 // AI DIET & WORKOUT ROUTE (FINAL)
 // ===============================
 app.post("/ai-diet-workout", async (req, res) => {
-  try {
-    const {
-      age,
-      gender,
-      height,
-      weight,
-      bmi,
-      preference,
-      healthIssues = []
-    } = req.body;
+  console.log("🟢 /ai-diet-workout HIT");
+  console.log("📦 Request body:", req.body);
 
-    if (!age || !gender || !height || !weight || !bmi || !preference) {
-      return res.status(400).json({ message: "Missing required fields" });
+  try {
+    if (!openai) {
+      console.error("❌ OpenAI not initialized");
+      return res.status(503).json({
+        success: false,
+        message: "AI disabled (OPENAI_API_KEY missing)",
+      });
     }
 
-    
-    // -------------------------------
-    // BMI BASED GOAL
-    // -------------------------------
-    let fitnessGoal = "maintenance";
-    if (bmi >= 25) fitnessGoal = "weight_loss";
-    else if (bmi < 18.5) fitnessGoal = "weight_gain";
+    const { age, gender, height, weight, bmi, preference } = req.body;
 
-
-    // 🚫 STRICT VEGAN BLOCK LIST
-    const veganForbidden = [
-      "milk", "curd", "paneer", "cheese", "butter", "ghee",
-      "yogurt", "cream", "egg", "eggs", "chicken", "fish",
-      "mutton", "meat", "honey", ""
-    ];
-
-    const isVegan = preference.toLowerCase() === "vegan";
-
-
+    if (!age || !gender || !height || !weight || !bmi) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required user details",
+      });
+    }
 
     const prompt = `
-    You are an AI fitness trainer and clinical nutritionist.
+Create a personalized DIET PLAN and WORKOUT PLAN.
 
-    STRICT RULE:
-    Return ONLY valid JSON. No explanations, no markdown.
+User details:
+- Age: ${age}
+- Gender: ${gender}
+- Height: ${height}
+- Weight: ${weight}
+- BMI: ${bmi}
+- Food Preference: ${preference}
 
-    USER PROFILE:
-    Age: ${age}
-    Gender: ${gender}
-    Height: ${height} cm
-    Weight: ${weight} kg
-    BMI: ${bmi}
-    Food Preference: ${preference}
-    Health Issues: ${healthIssues.join(", ") || "None"}
+Rules:
+- Vegetarian diet if preference is vegetarian
+- Safe for beginners
+- Simple Indian food
+- Home workouts (no gym mandatory)
 
-    DECISION LOGIC (MANDATORY):
-    1. Determine FITNESS GOAL using BMI:
-      - BMI < 18.5 → Weight Gain
-      - BMI 18.5–24.9 → Weight Maintenance
-      - BMI ≥ 25 → Weight Loss
+Format response exactly as:
+DIET PLAN:
+<diet>
 
-    2. Modify BOTH diet and workout based on:
-      - Gender (safety, intensity)
-      - Health Issues (PCOS, Thyroid, Diabetes, Anemia, etc.)
+WORKOUT PLAN:
+<workout>
+`;
 
-    3. Health issues take PRIORITY over BMI goals.
-
-    DIET RULES:
-    - Follow food preference strictly.
-    - Vegan → NO milk, curd, paneer, butter, ghee, eggs, meat.
-    - Indian foods only.
-    - Mention WHY each food is chosen (nutrients, health benefit).
-    - Include meal timing ONLY in column headers (not inside food text).
-
-    WORKOUT RULES:
-    - Separate workouts for Weight Loss / Gain / Maintenance.
-    - Adjust intensity by gender.
-    - Avoid unsafe exercises for health issues.
-    - Include purpose of workout.
-
-    OUTPUT JSON FORMAT (STRICT):
-
-    {
-      "fitnessGoal": "Weight Loss | Weight Gain | Maintenance",
-      "healthFocus": ["PCOS", "Thyroid", "None"],
-
-      "weeklyDiet": {
-        "Sunday": {
-          "breakfast": "Food (reason)",
-          "juice": "Drink (reason)",
-          "lunch": "Meal (reason)",
-          "snack": "Snack (reason)",
-          "dinner": "Dinner (reason)"
-        }
-      },
-
-      "weeklyWorkout": {
-        "Sunday": {
-          "goalType": "Weight Loss | Weight Gain | Maintenance",
-          "activity": "Workout name",
-          "duration": "Time",
-          "intensity": "Low | Moderate | High",
-          "notes": "Why this workout is suitable"
-        }
-      },
-
-      "confidence": "HIGH"
-    }
-    `;
-
-
-    // 🤖 AI CALL
-    const response = await openai.responses.create({
+    const response = await openai.chat.completions.create({
       model: "gpt-4.1-mini",
-      input: prompt
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.4,
     });
 
-    const raw = response.output_text;
-    console.log("🔵 AI RAW RESPONSE:\n", raw);
+    const text = response.choices?.[0]?.message?.content;
 
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (e) {
-      return res.status(500).json({ message: "AI returned invalid JSON" });
+    if (!text) {
+      throw new Error("Empty AI response");
     }
 
-    // ===============================
-    // 🧹 FINAL VEGAN SANITIZER (SERVER-SIDE)
-    // ===============================
-    if (isVegan && parsed.weeklyDiet) {
-      for (const day in parsed.weeklyDiet) {
-        for (const meal in parsed.weeklyDiet[day]) {
-          let value = parsed.weeklyDiet[day][meal];
+    const dietPlan = text.split("WORKOUT PLAN:")[0]
+      .replace("DIET PLAN:", "")
+      .trim();
 
-          veganForbidden.forEach(word => {
-            const regex = new RegExp(`\\b${word}\\b`, "gi");
-            value = value.replace(regex, "plant-based alternative");
-          });
+    const workoutPlan = text.split("WORKOUT PLAN:")[1]?.trim();
 
-          parsed.weeklyDiet[day][meal] = value;
-        }
-      }
-    }
-
-    // ✅ SEND FINAL SAFE RESPONSE
     res.json({
-      weeklyDiet: parsed.weeklyDiet || {},
-      weeklyWorkout: parsed.weeklyWorkout || {},
-      confidence: parsed.confidence || "HIGH"
+      success: true,
+      dietPlan,
+      workoutPlan,
     });
 
   } catch (err) {
-    console.error("❌ AI DIET ERROR:", err);
-    res.status(500).json({ message: "Diet/workout AI failed" });
+    console.error("❌ AI Diet Error:", err.message);
+    console.error(err);
+    res.status(500).json({
+      success: false,
+      message: "AI failed to generate plan",
+    });
   }
 });
+
    
 /* ======================
    START SERVER
